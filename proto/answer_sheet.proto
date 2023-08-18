@@ -34,6 +34,15 @@ message StartDoTestResponse {
   string message = 1;
 }
 
+message CheckUserSubmittedRequest {
+  int64  test_id = 1;
+  int64  user_id = 2;
+}
+
+message CheckUserSubmittedResponse {
+  bool  data = 1;
+}
+
 message CheckUserDoingTestRequest {
   int64 user_id = 1;
   int64 test_id = 2;
@@ -70,6 +79,20 @@ message GetCurrentTestResponse {
   repeated Answer data = 2;
 }
 
+message GetScoreRequest {
+  int64  test_id = 1;
+  int64  user_id = 2;
+  string session = 3;
+}
+
+message GetScoreResponse {
+  float score = 1;
+}
+
+message GetScoreResultItem {
+  int64 questionId = 1;
+
+}
 
 service AnswerSheetService {
   rpc StartDoTest(StartDoTestRequest) returns(StartDoTestResponse) {
@@ -81,4 +104,7 @@ service AnswerSheetService {
   rpc CheckUserDoingTest(CheckUserDoingTestRequest) returns(CheckUserDoingTestResponse);
   rpc GetLatestStartTime(GetLatestStartTimeRequest) returns(GetLatestStartTimeResponse);
   rpc GetCurrentTest(GetCurrentTestRequest) returns(GetCurrentTestResponse);
+  rpc CheckUserSubmitted(CheckUserSubmittedRequest) returns(CheckUserSubmittedResponse);
+  rpc GetScore(GetScoreRequest) returns (GetScoreResponse);
+
 }

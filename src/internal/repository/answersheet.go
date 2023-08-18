@@ -27,6 +27,23 @@ func (r *answersheetRepository) Create(ctx context.Context, event *entities.Even
 	return nil
 }
 
+func (r *answersheetRepository) FindByStatusEnd(ctx context.Context, userId int, testId int) (*entities.Event, error) {
+	filter := bson.M{
+		"event":   entities.END,
+		"user_id": userId,
+		"test_id": testId,
+	}
+	resp := r.mongo.Database("picket").Collection("events").FindOne(ctx, filter)
+	if resp.Err() != nil {
+		return nil, resp.Err()
+	}
+	var result entities.Event
+	if err := resp.Decode(&result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 func (r *answersheetRepository) GetLatestEventWithLimit(ctx context.Context, userId int, testId int, limit int) ([]entities.Event, error) {
 	filter := bson.D{
 		{

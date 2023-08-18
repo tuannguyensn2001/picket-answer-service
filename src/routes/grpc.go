@@ -12,8 +12,12 @@ import (
 
 func Grpc(ctx context.Context, s *grpc.Server, config config.IConfig) {
 
+	testRepository := repository.NewTestRepository(config.GetMongo())
+	testUsecase := usecase.NewTestUsecase(testRepository)
+	transport.NewTestTransport(ctx, testUsecase, config)
+
 	answersheetRepository := repository.NewAnswersheetRepository(config.GetMongo())
-	answersheetUsecase := usecase.NewAnswersheetUsecase(answersheetRepository, config)
+	answersheetUsecase := usecase.NewAnswersheetUsecase(answersheetRepository, config, testUsecase)
 	answersheetTransport := transport.NewAnswerSheetTransport(ctx, answersheetUsecase, config)
 
 	answersheetpb.RegisterAnswerSheetServiceServer(s, answersheetTransport)

@@ -23,6 +23,7 @@ import (
 
 type IAnswersheetRepository interface {
 	Create(ctx context.Context, event *entities.Event) error
+	FindByStatusEnd(ctx context.Context, userId int, testId int) (*entities.Event, error)
 	GetLatestEvent(ctx context.Context, userId int, testId int) ([]entities.Event, error)
 	GetLatestStartEvent(ctx context.Context, userId int, testId int) (*entities.Event, error)
 	GetLatestEventWithLimit(ctx context.Context, userId int, testId int, limit int) ([]entities.Event, error)
@@ -30,15 +31,21 @@ type IAnswersheetRepository interface {
 }
 
 type answersheetUsecase struct {
-	repository IAnswersheetRepository
-	config     config.IConfig
+	repository  IAnswersheetRepository
+	config      config.IConfig
+	testUsecase ITestUsecase
 }
 
-func NewAnswersheetUsecase(repository IAnswersheetRepository, iConfig config.IConfig) *answersheetUsecase {
-	return &answersheetUsecase{repository: repository, config: iConfig}
+type ITestUsecase interface {
+	GetByTestId(ctx context.Context, testId int) (*entities.Test, error)
+}
+
+func NewAnswersheetUsecase(repository IAnswersheetRepository, iConfig config.IConfig, testUsecase ITestUsecase) *answersheetUsecase {
+	return &answersheetUsecase{repository: repository, config: iConfig, testUsecase: testUsecase}
 }
 
 var tracer = otel.Tracer("usecase")
+var ErrUserSubmitted = errors.New("user submitted")
 
 func (u *answersheetUsecase) StartTest(ctx context.Context, input dto.StartTestInput) error {
 
@@ -229,4 +236,100 @@ func (u *answersheetUsecase) UserAnswer(ctx context.Context, input dto.UserAnswe
 	}
 
 	return nil
+}
+
+func (u *answersheetUsecase) CheckUserSubmitted(ctx context.Context, userId int, testId int) (bool, error) {
+	result, err := u.repository.FindByStatusEnd(ctx, userId, testId)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return false, nil
+		}
+		log.Error().Err(err).Send()
+		return false, err
+	}
+	if result != nil {
+		return true, nil
+	}
+
+	return false, nil
+}
+
+func (u *answersheetUsecase) SubmitTest(ctx context.Context, input dto.SubmitTestInput) error {
+	check, err := u.CheckUserSubmitted(ctx, input.Payload.UserId, input.Payload.TestId)
+	if err != nil {
+		log.Error().Err(err).Send()
+		return err
+	}
+	if check {
+		log.Info().Int("user_id", input.Payload.UserId).Int("test_id", input.Payload.TestId).Msg("user submitted")
+		return ErrUserSubmitted
+	}
+	event, err := u.repository.GetLatestStartEvent(ctx, input.Payload.UserId, input.Payload.TestId)
+	if err != nil {
+		log.Error().Err(err).Send()
+		return err
+	}
+	sessionId := event.Session
+	e := entities.Event{
+		UserId:    input.Payload.UserId,
+		TestId:    input.Payload.TestId,
+		CreatedAt: input.Payload.CreatedAt,
+		UpdatedAt: input.Payload.UpdatedAt,
+		Event:     entities.END,
+		Id:        primitive.NewObjectID(),
+		Session:   sessionId,
+	}
+
+	err = u.repository.Create(ctx, &e)
+	if err != nil {
+		log.Error().Err(err).Send()
+		return err
+	}
+
+	return nil
+}
+
+func (u *answersheetUsecase) GetScore(ctx context.Context, input dto.GetScoreInput) (*dto.GetScoreOutput, error) {
+	submitted, err := u.CheckUserSubmitted(ctx, input.UserId, input.TestId)
+	if err != nil {
+		return nil, err
+	}
+	if !submitted {
+		return nil, errors.New("user didn't submit")
+	}
+	test, err := u.testUsecase.GetByTestId(ctx, input.TestId)
+	if err != nil {
+		log.Error().Err(err).Send()
+		return nil, err
+	}
+
+	answers, err := u.GetCurrentTest(ctx, input.TestId, input.UserId)
+	if err != nil {
+		log.Error().Err(err).Send()
+		return nil, err
+	}
+
+	var score float32
+	if test.Content.MultipleChoice != nil {
+		if test.Content.MultipleChoice.Answers != nil {
+			mapAnswers := make(map[int]string)
+			for _, item := range answers {
+				mapAnswers[item.QuestionId] = item.Answer
+			}
+			for _, item := range test.Content.MultipleChoice.Answers {
+				answer, ok := mapAnswers[item.Id]
+				if !ok {
+					continue
+				}
+				if answer == item.Answer {
+					score += float32(item.Score)
+				}
+			}
+		}
+
+	}
+
+	return &dto.GetScoreOutput{
+		Score: score,
+	}, nil
 }
